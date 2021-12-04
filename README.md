@@ -10,6 +10,7 @@ Add MFA/2FA support in your CLI for IDPs that support [OAuth 2.0 Authorization C
 - State verification
 - Includes the recommended [PKCE - Proof Key for Code Exchange](https://datatracker.ietf.org/doc/html/rfc7636) extension
 - Cross platform default browser invocation
+- Zero dependencies
 
 ## Usage
 

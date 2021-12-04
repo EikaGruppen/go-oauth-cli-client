@@ -21,6 +21,9 @@ redirect_uris: ["http://localhost"]
 ```
 
 ### Get this library
+```
+go get github.com/EikaGruppen/go-oauth-cli-client
+```
 
 ### Use it
 

@@ -1,6 +1,6 @@
 # go-oauth-cli-client
 
-Add MFA/2FA support in your CLI for interaction with services that supports [OAuth 2.0 authorization code flow](https://datatracker.ietf.org/doc/html/rfc6749)
+Add MFA/2FA support in your CLI for IDPs that support [OAuth 2.0 Authorization Code Flow](https://datatracker.ietf.org/doc/html/rfc6749)
 
 ## Features
 
@@ -15,9 +15,9 @@ Add MFA/2FA support in your CLI for interaction with services that supports [OAu
 
 ### Configure OAuth Client in the OAuth server
 
-````yaml
+```yaml
 client_id: "my_cli"
-redirect_uris: ["http://localhost/oauth/callback"]
+redirect_uris: ["http://localhost"]
 ```
 
 ### Get this library
@@ -27,8 +27,8 @@ redirect_uris: ["http://localhost/oauth/callback"]
 ```go 
 opts := oauth.Options{
   AuthorizationEndpoint: "https://the.oauth.server.com/authorize",
-	TokenEndpoint: "https://the.oauth.server.com/token",
-	ClientId: "my_cli",
+  TokenEndpoint: "https://the.oauth.server.com/token",
+  ClientId: "my_cli",
 }
 
 accessToken, expiry, err := oauth.GetAccessToken(opts) // will open browser for user to do MFA, and show callback page there when done
@@ -41,17 +41,18 @@ if err != nil {
 
 Callback page will let the user know whether the auth was successful or not, and that they may close the page and go back to the terminal:
 
+```
 +----------------------------------------------------------------+
 |   +---------------------------------------------------+        |
 |   | 🔍️ |  http://localhost:8080/oauth/callback        |        |
 |   +---------------------------------------------------+        |
 |                                                                |
-|              Logged in successfully!                           |
+|                  Logged in successfully!                       |
 |                                                                |
-|         _You may now close this browser window_                |
+|           _You may now close this browser window_              |
 |                                                                |
-|                                                                |
+|                        [ close ]                               |
 |                                                                |
 +----------------------------------------------------------------+
-
+```
 

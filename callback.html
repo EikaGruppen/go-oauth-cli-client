@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>{{.Title}}</title>
+		<style>
+			body {
+				background-color: #1a1a1e;
+			}
+
+			h1, p {
+				color: white;
+				text-align: center;
+				font-family: verdana;
+			}
+
+			.button {
+				background-color: #555555;
+				border: none;
+				color: white;
+				padding: 15px 32px;
+				text-align: center;
+				text-decoration: none;
+				display: block;
+				font-size: 16px;
+				margin: 5em auto;
+				transition-duration: 0.4s;
+				border-radius: 4px;
+			}
+			.button:hover {
+				background-color: #222;
+			}
+
+		</style>
+	</head>
+	<body>
+		<h1>{{.Heading}}</h1>
+		<p>{{.Message}}</p>
+		<button class="button" type="button" onclick="window.open('', '_self', ''); window.close();">Close window</button>
+	</body>
+</html> 

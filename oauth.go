@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"time"
 )
 
 type PortRange struct {
@@ -28,9 +27,11 @@ type Options struct {
 	PortRange PortRange
 }
 
-type tokenResponse struct {
-	BearerToken string `json:"access_token"`
-	ExpiresIn   int64  `json:"expires_in"`
+type TokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	IdToken      string `json:"id_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int64  `json:"expires_in"`
 }
 
 type oauthErrorResponse struct {
@@ -38,11 +39,11 @@ type oauthErrorResponse struct {
 	ErrorDescription string `json:"error_description"`
 }
 
-func GetAccessToken(opts Options) (accessToken string, expiry time.Time, err error) {
+func GetAccessToken(opts Options) (tokenResponse *TokenResponse, err error) {
 	return listenForCode(opts)
 }
 
-func getAccessCode(opts Options, code string, codeVerifier string, redirectUri string) (accessCode string, expiry time.Time, err error) {
+func getAccessCode(opts Options, code string, codeVerifier string, redirectUri string) (tokenResponse *TokenResponse, err error) {
 
 	urlValues := url.Values{
 		"code":          {code},
@@ -54,43 +55,43 @@ func getAccessCode(opts Options, code string, codeVerifier string, redirectUri s
 	}
 	response, err := http.PostForm(opts.TokenEndpoint, urlValues)
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 	defer response.Body.Close()
 
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 	if response.StatusCode >= 400 {
 		var error oauthErrorResponse
 		err = json.Unmarshal(body, &error)
 		if err != nil {
-			return "", time.Time{}, err
+			return nil, err
 		}
-		return "", time.Time{}, fmt.Errorf("Got error from OAuth Server [%s]: %s", error.Error, error.ErrorDescription)
+		return nil, fmt.Errorf("Got error from OAuth Server [%s]: %s", error.Error, error.ErrorDescription)
 	}
-	var token tokenResponse
+	var token TokenResponse
 	err = json.Unmarshal(body, &token)
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
-	return token.BearerToken, time.Now().Add(time.Duration(token.ExpiresIn) * time.Second), nil
+	return &token, nil
 }
 
-func listenForCode(opts Options) (accessToken string, expiry time.Time, err error) {
+func listenForCode(opts Options) (tokenResponse *TokenResponse, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	requestState, err := generateState()
 	if err != nil {
 		cancel()
-		return "", time.Time{}, err
+		return nil, err
 	}
 
 	codeVer, err := createCodeVerifier()
 	if err != nil {
 		cancel()
-		return "", time.Time{}, err
+		return nil, err
 	}
 
 	codeChallange := codeVer.codeChallengeS256()
@@ -117,7 +118,7 @@ func listenForCode(opts Options) (accessToken string, expiry time.Time, err erro
 			return
 		}
 
-		token, exp, err := getAccessCode(opts, code, codeVerifier, redirectUri)
+		token, err := getAccessCode(opts, code, codeVerifier, redirectUri)
 		if err != nil {
 			serverErrors = append(serverErrors, err)
 			err = writeErrorPage(w)
@@ -125,8 +126,7 @@ func listenForCode(opts Options) (accessToken string, expiry time.Time, err erro
 				serverErrors = append(serverErrors, err)
 			}
 		}
-		accessToken = token
-		expiry = exp
+		tokenResponse = token
 		err = writeSuccessPage(w)
 		if err != nil {
 			serverErrors = append(serverErrors, err)
@@ -143,7 +143,7 @@ func listenForCode(opts Options) (accessToken string, expiry time.Time, err erro
 
 	authUrl, err := url.Parse(opts.AuthorizationEndpoint)
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 	q := url.Values{
 		"client_id":             {opts.ClientId},
@@ -162,17 +162,17 @@ func listenForCode(opts Options) (accessToken string, expiry time.Time, err erro
 
 	err = OpenUrl(authUrl)
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 	fmt.Printf("Default browser has been opened at %s. Please continue login in the browser\n\n", opts.AuthorizationEndpoint)
 
 	<-ctx.Done()
 	err = srv.Shutdown(context.Background())
 	if err != nil {
-		return "", time.Time{}, err
+		return nil, err
 	}
 	if len(serverErrors) > 0 {
-		return "", time.Time{}, fmt.Errorf("There were local server errors: %v", serverErrors)
+		return nil, fmt.Errorf("There were local server errors: %v", serverErrors)
 	}
-	return accessToken, expiry, err
+	return tokenResponse, err
 }

@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-
 type PortRange struct {
 	Start int
 	End   int
@@ -79,7 +78,6 @@ func getAccessCode(opts Options, code string, codeVerifier string, redirectUri s
 	return token.BearerToken, time.Now().Add(time.Duration(token.ExpiresIn) * time.Second), nil
 }
 
-
 func listenForCode(opts Options) (accessToken string, expiry time.Time, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -131,7 +129,7 @@ func listenForCode(opts Options) (accessToken string, expiry time.Time, err erro
 		expiry = exp
 		err = writeSuccessPage(w)
 		if err != nil {
-				serverErrors = append(serverErrors, err)
+			serverErrors = append(serverErrors, err)
 		}
 
 		cancel()
@@ -150,7 +148,7 @@ func listenForCode(opts Options) (accessToken string, expiry time.Time, err erro
 	q := url.Values{
 		"client_id":             {opts.ClientId},
 		"client_secret":         {opts.ClientSecret},
-		"redirect_uri":          {url.QueryEscape(redirectUri)},
+		"redirect_uri":          {redirectUri},
 		"response_type":         {"code"},
 		"code_challenge":        {codeChallange},
 		"code_challenge_method": {"S256"},

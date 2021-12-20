@@ -34,7 +34,7 @@ opts := oauth.Options{
   TokenEndpoint: "https://the.oauth.server.com/token",
   ClientId: "my_cli",
   ClientSecret: "my_cli_secret", // optional
-	AuthorizationExtParams: map[string]string{"scope": "openid"}, // optional
+  AuthorizationExtParams: map[string]string{"scope": "openid"}, // optional
 }
 
 tokenResponse, err := oauth.AuthorizationCodeFlow(opts) // will open browser for user to do MFA, and show callback page there when done

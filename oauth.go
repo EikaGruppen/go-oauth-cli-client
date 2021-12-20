@@ -18,8 +18,8 @@ type PortRange struct {
 type Options struct {
 	AuthorizationEndpoint string
 	// Extensions to the standard OAuth Parameters for the authorizaion endpoint
-	AuthorizaionExtParams map[string]string
-	TokenEndpoint         string
+	AuthorizationExtParams map[string]string
+	TokenEndpoint          string
 
 	ClientId     string
 	ClientSecret string
@@ -155,7 +155,7 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 		"state":                 {requestState},
 	}
 
-	for k, v := range opts.AuthorizaionExtParams {
+	for k, v := range opts.AuthorizationExtParams {
 		q.Set(k, v)
 	}
 	authUrl.RawQuery = q.Encode()

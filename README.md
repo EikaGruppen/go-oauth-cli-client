@@ -33,14 +33,21 @@ opts := oauth.Options{
   AuthorizationEndpoint: "https://the.oauth.server.com/authorize",
   TokenEndpoint: "https://the.oauth.server.com/token",
   ClientId: "my_cli",
+  ClientSecret: "my_cli_secret", // optional
+  AuthorizationExtParams: map[string]string{"scope": "openid"}, // optional
 }
 
-accessToken, expiry, err := oauth.GetAccessToken(opts) // will open browser for user to do MFA, and show callback page there when done
+tokenResponse, err := oauth.AuthorizationCodeFlow(opts) // will open browser for user to do MFA, and show callback page there when done
 if err != nil {
   // handle
 }
 
-// store accessToken safely, and use it to authorize towards the service
+fmt.Println(tokenResponse.AccessToken)
+fmt.Println(tokenResponse.IdToken) // optional
+fmt.Println(tokenResponse.RefreshToken) // optional
+fmt.Println(tokenResponse.ExpiresIn)
+
+// store tokens safely, and use them to authorize towards the service
 ```
 
 Callback page will let the user know whether the auth was successful or not, and that they may close the page and go back to the terminal:

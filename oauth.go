@@ -18,8 +18,8 @@ type PortRange struct {
 type Options struct {
 	AuthorizationEndpoint string
 	// Extensions to the standard OAuth Parameters for the authorizaion endpoint
-	AuthorizaionExtParams map[string]string
-	TokenEndpoint         string
+	AuthorizationExtParams map[string]string
+	TokenEndpoint          string
 
 	ClientId     string
 	ClientSecret string
@@ -39,11 +39,11 @@ type oauthErrorResponse struct {
 	ErrorDescription string `json:"error_description"`
 }
 
-func GetAccessToken(opts Options) (tokenResponse *TokenResponse, err error) {
-	return listenForCode(opts)
+func AuthorizationCodeFlow(opts Options) (tokenResponse *TokenResponse, err error) {
+	return listenForAuthorizationCode(opts)
 }
 
-func getAccessCode(opts Options, code string, codeVerifier string, redirectUri string) (tokenResponse *TokenResponse, err error) {
+func getAuthorizationCode(opts Options, code string, codeVerifier string, redirectUri string) (tokenResponse *TokenResponse, err error) {
 
 	urlValues := url.Values{
 		"code":          {code},
@@ -79,7 +79,7 @@ func getAccessCode(opts Options, code string, codeVerifier string, redirectUri s
 	return &token, nil
 }
 
-func listenForCode(opts Options) (tokenResponse *TokenResponse, err error) {
+func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	requestState, err := generateState()
@@ -118,7 +118,7 @@ func listenForCode(opts Options) (tokenResponse *TokenResponse, err error) {
 			return
 		}
 
-		token, err := getAccessCode(opts, code, codeVerifier, redirectUri)
+		token, err := getAuthorizationCode(opts, code, codeVerifier, redirectUri)
 		if err != nil {
 			serverErrors = append(serverErrors, err)
 			err = writeErrorPage(w)
@@ -155,7 +155,7 @@ func listenForCode(opts Options) (tokenResponse *TokenResponse, err error) {
 		"state":                 {requestState},
 	}
 
-	for k, v := range opts.AuthorizaionExtParams {
+	for k, v := range opts.AuthorizationExtParams {
 		q.Set(k, v)
 	}
 	authUrl.RawQuery = q.Encode()

@@ -147,7 +147,6 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 	}
 	q := url.Values{
 		"client_id":             {opts.ClientId},
-		"client_secret":         {opts.ClientSecret},
 		"redirect_uri":          {redirectUri},
 		"response_type":         {"code"},
 		"code_challenge":        {codeChallange},

@@ -31,6 +31,8 @@ jobs:
 
           if echo "$commits" | grep "BREAKING CHANGE" >/dev/null 2>&1 ; then
               major=$((major + 1))
+              minor=0
+              patch=0
               git tag v$major.$minor.$patch
               git push origin v$major.$minor.$patch
               GOPROXY=proxy.golang.org go list -m github.com/EikaGruppen/go-oauth-cli-client@v$major.$minor.$patch
@@ -39,6 +41,7 @@ jobs:
 
           if echo "$commits" | grep -E "(^feat:|^feat\()" >/dev/null 2>&1; then
               minor=$((minor + 1))
+              patch=0
               git tag v$major.$minor.$patch
               git push origin v$major.$minor.$patch
               GOPROXY=proxy.golang.org go list -m github.com/EikaGruppen/go-oauth-cli-client@v$major.$minor.$patch

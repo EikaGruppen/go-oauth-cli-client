@@ -24,6 +24,8 @@ type Options struct {
 	ClientId     string
 	ClientSecret string
 
+	RedirectUri *url.URL
+
 	PortRange PortRange
 }
 
@@ -101,9 +103,18 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 
 	port := opts.PortRange.Start // TODO check for open ports
 
-	redirectUri := fmt.Sprintf("http://localhost:%d/oauth/callback", port)
+	var redirectUri string
+	var path string
 
-	http.HandleFunc("/oauth/callback", func(w http.ResponseWriter, r *http.Request) {
+	if opts.RedirectUri != nil && *opts.RedirectUri != (url.URL{}) {
+		redirectUri = opts.RedirectUri.String()
+		path = opts.RedirectUri.Path
+	} else {
+		path = "/oauth/callback"
+		redirectUri = fmt.Sprintf("http://localhost:%d/%s", port, path)
+	}
+
+	http.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 
 		queryparams := r.URL.Query()
 		responseState := queryparams.Get("state")
@@ -163,7 +174,7 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Default browser has been opened at %s. Please continue login in the browser\n\n", opts.AuthorizationEndpoint)
+	fmt.Printf("Default browser has been opened at %s. Please continue login in the browser\n\n", authUrl)
 
 	<-ctx.Done()
 	err = srv.Shutdown(context.Background())

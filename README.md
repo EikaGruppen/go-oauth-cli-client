@@ -67,3 +67,17 @@ Callback page will let the user know whether the auth was successful or not, and
 +----------------------------------------------------------------+
 ```
 
+#### Redirect URI
+
+By default, `http://localhost:<choosen port>/oauth/callback` will be used. This can be overridden by setting `redirectUri`:
+
+```go
+redirectUri, err := url.Parse("https://my-url.com/the/callback")
+// handle err
+
+opts := oauth.Options{
+  // ...
+  redirectUri: redirectUri,
+  // ...
+}
+```

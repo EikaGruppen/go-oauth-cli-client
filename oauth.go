@@ -114,7 +114,7 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 		redirectUri = fmt.Sprintf("http://localhost:%d%s", port, path)
 	}
 
-	http.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+	callbackHandler := func(w http.ResponseWriter, r *http.Request) {
 
 		queryparams := r.URL.Query()
 		responseState := queryparams.Get("state")
@@ -144,10 +144,13 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 		}
 
 		cancel()
-	})
-	srv := &http.Server{Addr: fmt.Sprintf("localhost:%d", port)}
+	}
+
+	serverMux := http.NewServeMux()
+	serverMux.HandleFunc(path, callbackHandler)
+
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := http.ListenAndServe(fmt.Sprintf("localhost:%d", port), serverMux); err != nil && err != http.ErrServerClosed {
 			serverErrors = append(serverErrors, fmt.Errorf("Local server error: %v", err))
 		}
 	}()
@@ -177,10 +180,6 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 	fmt.Printf("Default browser has been opened at %s. Please continue login in the browser\n\n", authUrl)
 
 	<-ctx.Done()
-	err = srv.Shutdown(context.Background())
-	if err != nil {
-		return nil, err
-	}
 	if len(serverErrors) > 0 {
 		return nil, fmt.Errorf("There were local server errors: %v", serverErrors)
 	}

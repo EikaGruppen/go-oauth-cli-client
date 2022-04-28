@@ -111,7 +111,7 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 		path = opts.RedirectUri.Path
 	} else {
 		path = "/oauth/callback"
-		redirectUri = fmt.Sprintf("http://localhost:%d/%s", port, path)
+		redirectUri = fmt.Sprintf("http://localhost:%d%s", port, path)
 	}
 
 	http.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {

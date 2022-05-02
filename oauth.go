@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 type PortRange struct {
@@ -18,6 +19,7 @@ type PortRange struct {
 type Options struct {
 	AuthorizationEndpoint string
 	// Extensions to the standard OAuth Parameters for the authorizaion endpoint
+	Scopes                 []string
 	AuthorizationExtParams map[string]string
 	TokenEndpoint          string
 
@@ -166,6 +168,7 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 		"code_challenge":        {codeChallange},
 		"code_challenge_method": {"S256"},
 		"state":                 {requestState},
+		"scope":                 {strings.Join(opts.Scopes, " ")},
 	}
 
 	for k, v := range opts.AuthorizationExtParams {

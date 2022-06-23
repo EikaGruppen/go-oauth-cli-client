@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -18,10 +20,11 @@ type PortRange struct {
 
 type Options struct {
 	AuthorizationEndpoint string
+	Scopes                []string
 	// Extensions to the standard OAuth Parameters for the authorizaion endpoint
-	Scopes                 []string
 	AuthorizationExtParams map[string]string
 	TokenEndpoint          string
+	RevokeEndpoint         string
 
 	ClientId     string
 	ClientSecret string
@@ -29,13 +32,20 @@ type Options struct {
 	RedirectUri *url.URL
 
 	PortRange PortRange
+
+	// Command used to open browser for auth
+	// An interrupt signal (SIGINT) is sent to the command when the callback has received a code
+	//
+	// If nil, system default browser will be used
+	OpenBrowser func(url *url.URL) *exec.Cmd
 }
 
 type TokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	IdToken      string `json:"id_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
+	IdToken          string `json:"id_token"`
+	AccessToken      string `json:"access_token"`
+	ExpiresIn        int64  `json:"expires_in"`
+	RefreshToken     string `json:"refresh_token"`
+	RefreshExpiresIn int64  `json:"refresh_expires_in"`
 }
 
 type oauthErrorResponse struct {
@@ -85,23 +95,20 @@ func getAuthorizationCode(opts Options, code string, codeVerifier string, redire
 
 func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	requestState, err := generateState()
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 
 	codeVer, err := createCodeVerifier()
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 
 	codeChallange := codeVer.codeChallengeS256()
 	codeVerifier := codeVer.String()
-
-	var serverErrors []error
 
 	port := opts.PortRange.Start // TODO check for open ports
 
@@ -115,47 +122,6 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 		path = "/oauth/callback"
 		redirectUri = fmt.Sprintf("http://localhost:%d%s", port, path)
 	}
-
-	callbackHandler := func(w http.ResponseWriter, r *http.Request) {
-
-		queryparams := r.URL.Query()
-		responseState := queryparams.Get("state")
-		if requestState != responseState {
-			serverErrors = append(serverErrors, errors.New("State does not match!"))
-			return
-		}
-
-		code := queryparams.Get("code")
-		if code == "" {
-			serverErrors = append(serverErrors, errors.New("No code returned from oauth"))
-			return
-		}
-
-		token, err := getAuthorizationCode(opts, code, codeVerifier, redirectUri)
-		if err != nil {
-			serverErrors = append(serverErrors, err)
-			err = writeErrorPage(w)
-			if err != nil {
-				serverErrors = append(serverErrors, err)
-			}
-		}
-		tokenResponse = token
-		err = writeSuccessPage(w)
-		if err != nil {
-			serverErrors = append(serverErrors, err)
-		}
-
-		cancel()
-	}
-
-	serverMux := http.NewServeMux()
-	serverMux.HandleFunc(path, callbackHandler)
-
-	go func() {
-		if err := http.ListenAndServe(fmt.Sprintf("localhost:%d", port), serverMux); err != nil && err != http.ErrServerClosed {
-			serverErrors = append(serverErrors, fmt.Errorf("Local server error: %v", err))
-		}
-	}()
 
 	authUrl, err := url.Parse(opts.AuthorizationEndpoint)
 	if err != nil {
@@ -176,15 +142,88 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 	}
 	authUrl.RawQuery = q.Encode()
 
-	err = OpenUrl(authUrl)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Printf("Default browser has been opened at %s. Please continue login in the browser\n\n", authUrl)
+	var cmd *exec.Cmd
 
-	<-ctx.Done()
-	if len(serverErrors) > 0 {
-		return nil, fmt.Errorf("There were local server errors: %v", serverErrors)
+	if opts.OpenBrowser != nil {
+		cmd = opts.OpenBrowser(authUrl)
 	}
+
+	callbackError := make(chan error)
+
+	callbackHandler := func(w http.ResponseWriter, r *http.Request) {
+
+		if cmd != nil {
+			err = cmd.Process.Signal(os.Interrupt)
+			if err != nil {
+				fmt.Println("Got error when interrupting browser process:", err.Error())
+			}
+		}
+
+		queryparams := r.URL.Query()
+		responseState := queryparams.Get("state")
+		if requestState != responseState {
+			callbackError <- errors.New("State does not match!")
+			writeErrorPage(w, callbackError)
+			return
+		}
+
+		code := queryparams.Get("code")
+		if code == "" {
+			callbackError <- errors.New("No code returned from IDP")
+			writeErrorPage(w, callbackError)
+			return
+		}
+
+		token, err := getAuthorizationCode(opts, code, codeVerifier, redirectUri)
+		if err != nil {
+			callbackError <- err
+			writeErrorPage(w, callbackError)
+			return
+		}
+		tokenResponse = token
+		writeSuccessPage(w, callbackError)
+
+		cancel()
+	}
+
+	serverMux := http.NewServeMux()
+	serverMux.HandleFunc(path, callbackHandler)
+
+	go func() {
+		if err := http.ListenAndServe(fmt.Sprintf("localhost:%d", port), serverMux); err != nil && err != http.ErrServerClosed {
+			callbackError <- fmt.Errorf("Error when starting: %w", err)
+		}
+	}()
+
+	if cmd != nil {
+		err := cmd.Start()
+		if err != nil {
+			return nil, fmt.Errorf("Failed to start browser with custom command: %w", err)
+		}
+		var exitErr error
+		go func() {
+			exitErr = cmd.Wait()
+		}()
+		select {
+		case err := <-callbackError:
+			return nil, fmt.Errorf("Local server error: %w", err)
+		case <-ctx.Done():
+		}
+
+		if exitErr != nil {
+			fmt.Println("Browser process exited with error:", exitErr.Error())
+		}
+	} else {
+		openDefaultBrowser(authUrl)
+		fmt.Printf("Default browser has been opened at %s. Please continue login in the browser\n\n", authUrl)
+
+		select {
+		case err := <-callbackError:
+			return nil, fmt.Errorf("Local server error: %w", err)
+		case <-ctx.Done():
+		}
+	}
+	close(callbackError)
+
 	return tokenResponse, err
 }

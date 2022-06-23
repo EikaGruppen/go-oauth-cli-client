@@ -7,7 +7,7 @@ import (
 	"runtime"
 )
 
-func OpenUrl(url *url.URL) error {
+func openDefaultBrowser(url *url.URL) error {
 	switch runtime.GOOS {
 	case "linux":
 		return exec.Command("xdg-open", url.String()).Start()

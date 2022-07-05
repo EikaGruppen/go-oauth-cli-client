@@ -225,5 +225,5 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 	}
 	close(callbackError)
 
-	return tokenResponse, err
+	return tokenResponse, nil
 }

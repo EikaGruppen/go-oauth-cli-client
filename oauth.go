@@ -1,22 +1,17 @@
 package oauth
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
-	"strings"
+	"sync"
+	"syscall"
+	"time"
 )
-
-type PortRange struct {
-	Start int
-	End   int
-}
 
 type Options struct {
 	AuthorizationEndpoint string
@@ -31,13 +26,17 @@ type Options struct {
 
 	RedirectUri *url.URL
 
+	ClientTimeout time.Duration
+
 	PortRange PortRange
 
-	// Command used to open browser for auth
-	// An interrupt signal (SIGINT) is sent to the command when the callback has received a code
-	//
 	// If nil, system default browser will be used
-	OpenBrowser func(url *url.URL) *exec.Cmd
+	Browser Browser
+}
+
+type PortRange struct {
+	Start int
+	End   int
 }
 
 type TokenResponse struct {
@@ -53,21 +52,20 @@ type oauthErrorResponse struct {
 	ErrorDescription string `json:"error_description"`
 }
 
-func AuthorizationCodeFlow(opts Options) (tokenResponse *TokenResponse, err error) {
-	return listenForAuthorizationCode(opts)
-}
-
-func getAuthorizationCode(opts Options, code string, codeVerifier string, redirectUri string) (tokenResponse *TokenResponse, err error) {
+func getAuthorizationCode(opts Options, code string, authorizeRequest authorizeRequest) (tokenResponse *TokenResponse, err error) {
 
 	urlValues := url.Values{
 		"code":          {code},
 		"grant_type":    {"authorization_code"},
 		"client_id":     {opts.ClientId},
-		"code_verifier": {codeVerifier},
+		"code_verifier": {authorizeRequest.codeVerifier},
 		"client_secret": {opts.ClientSecret},
-		"redirect_uri":  {redirectUri},
+		"redirect_uri":  {authorizeRequest.redirectUri.String()},
 	}
-	response, err := http.PostForm(opts.TokenEndpoint, urlValues)
+	client := http.Client{
+		Timeout: opts.ClientTimeout,
+	}
+	response, err := client.PostForm(opts.TokenEndpoint, urlValues)
 	if err != nil {
 		return nil, err
 	}
@@ -92,76 +90,72 @@ func getAuthorizationCode(opts Options, code string, codeVerifier string, redire
 	}
 	return &token, nil
 }
-
-func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	requestState, err := generateState()
+func AuthorizationCodeFlow(opts Options) (TokenResponse, error) {
+	flows, err := ConcurrentAuthorizationCodeFlow(opts.Browser, []Options{opts})
 	if err != nil {
-		return nil, err
+		return TokenResponse{}, nil
+	}
+	flow := flows[0]
+	return flow.TokenResponse, flow.Error
+}
+
+func ConcurrentAuthorizationCodeFlow(browser Browser, allOpts []Options) ([]codeFlowResult, error) {
+
+	if browser == nil {
+		browser = &DefaultBrowser{}
 	}
 
-	codeVer, err := createCodeVerifier()
-	if err != nil {
-		return nil, err
+	var flows []codeFlow
+
+	for _, opts := range allOpts {
+
+		port := opts.PortRange.Start
+
+		var listener net.Listener
+		var err error
+		for port <= opts.PortRange.End {
+			listener, err = net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+			if err != nil {
+				if errors.Is(err, syscall.EADDRINUSE) {
+					port++
+					continue
+				} else {
+					return nil, err
+				}
+			}
+			defer listener.Close()
+			break
+		}
+
+		authorizeRequest, err := authorizeUrl(opts, port)
+		if err != nil {
+			return nil, err
+		}
+
+		callbackError := make(chan error)
+		token := make(chan TokenResponse)
+		err = startServer(opts, authorizeRequest, listener, token, callbackError)
+		if err != nil {
+			return nil, err
+		}
+
+		flows = append(flows, codeFlow{
+			request:       authorizeRequest,
+			token:         token,
+			callbackError: callbackError,
+		})
 	}
 
-	codeChallange := codeVer.codeChallengeS256()
-	codeVerifier := codeVer.String()
+	return authorize(flows, browser)
+}
 
-	port := opts.PortRange.Start // TODO check for open ports
-
-	var redirectUri string
-	var path string
-
-	if opts.RedirectUri != nil && *opts.RedirectUri != (url.URL{}) {
-		redirectUri = opts.RedirectUri.String()
-		path = opts.RedirectUri.Path
-	} else {
-		path = "/oauth/callback"
-		redirectUri = fmt.Sprintf("http://localhost:%d%s", port, path)
-	}
-
-	authUrl, err := url.Parse(opts.AuthorizationEndpoint)
-	if err != nil {
-		return nil, err
-	}
-	q := url.Values{
-		"client_id":             {opts.ClientId},
-		"redirect_uri":          {redirectUri},
-		"response_type":         {"code"},
-		"code_challenge":        {codeChallange},
-		"code_challenge_method": {"S256"},
-		"state":                 {requestState},
-		"scope":                 {strings.Join(opts.Scopes, " ")},
-	}
-
-	for k, v := range opts.AuthorizationExtParams {
-		q.Set(k, v)
-	}
-	authUrl.RawQuery = q.Encode()
-
-	var cmd *exec.Cmd
-
-	if opts.OpenBrowser != nil {
-		cmd = opts.OpenBrowser(authUrl)
-	}
-
-	callbackError := make(chan error)
+func startServer(opts Options, authorizeRequest authorizeRequest, listener net.Listener, tokenChan chan<- TokenResponse, callbackError chan<- error) error {
 
 	callbackHandler := func(w http.ResponseWriter, r *http.Request) {
 
-		if cmd != nil {
-			err = cmd.Process.Signal(os.Interrupt)
-			if err != nil {
-				fmt.Println("Got error when interrupting browser process:", err.Error())
-			}
-		}
-
 		queryparams := r.URL.Query()
 		responseState := queryparams.Get("state")
-		if requestState != responseState {
+		if authorizeRequest.state != responseState {
 			callbackError <- errors.New("State does not match!")
 			writeErrorPage(w, callbackError)
 			return
@@ -174,56 +168,78 @@ func listenForAuthorizationCode(opts Options) (tokenResponse *TokenResponse, err
 			return
 		}
 
-		token, err := getAuthorizationCode(opts, code, codeVerifier, redirectUri)
+		token, err := getAuthorizationCode(opts, code, authorizeRequest)
 		if err != nil {
 			callbackError <- err
 			writeErrorPage(w, callbackError)
 			return
 		}
-		tokenResponse = token
+		tokenChan <- *token
 		writeSuccessPage(w, callbackError)
-
-		cancel()
 	}
 
 	serverMux := http.NewServeMux()
-	serverMux.HandleFunc(path, callbackHandler)
+	serverMux.HandleFunc("/" +authorizeRequest.redirectUri.Path, callbackHandler)
 
 	go func() {
-		if err := http.ListenAndServe(fmt.Sprintf("localhost:%d", port), serverMux); err != nil && err != http.ErrServerClosed {
+		if err := http.Serve(listener, serverMux); err != nil && err != http.ErrServerClosed {
 			callbackError <- fmt.Errorf("Error when starting: %w", err)
 		}
 	}()
+	return nil
+}
 
-	if cmd != nil {
-		err := cmd.Start()
-		if err != nil {
-			return nil, fmt.Errorf("Failed to start browser with custom command: %w", err)
-		}
-		var exitErr error
-		go func() {
-			exitErr = cmd.Wait()
-		}()
-		select {
-		case err := <-callbackError:
-			return nil, fmt.Errorf("Local server error: %w", err)
-		case <-ctx.Done():
-		}
+type codeFlow struct {
+	request       authorizeRequest
+	token         <-chan TokenResponse
+	callbackError <-chan error
+}
 
-		if exitErr != nil {
-			fmt.Println("Browser process exited with error:", exitErr.Error())
-		}
-	} else {
-		openDefaultBrowser(authUrl)
-		fmt.Printf("Default browser has been opened at %s. Please continue login in the browser\n\n", authUrl)
+type codeFlowResult struct {
+	TokenResponse TokenResponse
+	Error         error
+}
 
-		select {
-		case err := <-callbackError:
-			return nil, fmt.Errorf("Local server error: %w", err)
-		case <-ctx.Done():
-		}
+func authorize(flows []codeFlow, browser Browser) ([]codeFlowResult, error) {
+	var authorizeUrls []*url.URL
+	for _, flow := range flows {
+		authorizeUrls = append(authorizeUrls, flow.request.url)
 	}
-	close(callbackError)
+	var wg sync.WaitGroup
+	wg.Add(len(flows))
 
-	return tokenResponse, nil
+	results := make([]codeFlowResult, len(flows))
+	var browserError error
+
+	go func() {
+		err := browser.Open(authorizeUrls)
+		if err != nil {
+			browserError = err
+		}
+	}()
+
+	for i, flow := range flows {
+		go func(i int, flow codeFlow) {
+			select {
+			case token := <-flow.token:
+				results[i] = codeFlowResult{TokenResponse: token}
+			case err := <-flow.callbackError:
+				results[i] = codeFlowResult{Error: fmt.Errorf("Local server error: %w", err)}
+			case <-time.After(3 * time.Minute):
+				results[i] = codeFlowResult{Error: errors.New("Timed out waiting for oauth token")}
+			}
+			wg.Done()
+		}(i, flow)
+	}
+	wg.Wait()
+
+	if browserError != nil {
+		return nil, browserError
+	}
+
+	err := browser.Destroy()
+	if err != nil {
+		return nil, browserError
+	}
+	return results, nil
 }

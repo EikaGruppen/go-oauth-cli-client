@@ -1,3 +1,3 @@
 module github.com/EikaGruppen/go-oauth-cli-client
 
-go 1.17
+go 1.20

@@ -49,7 +49,9 @@ func authorizeUrl(opts Options, port int) (request authorizeRequest, err error) 
 		"code_challenge":        {codeChallange},
 		"code_challenge_method": {"S256"},
 		"state":                 {request.state},
-		"scope":                 {strings.Join(opts.Scopes, " ")},
+	}
+	if len(opts.Scopes) > 0 {
+		q.Add("scope", strings.Join(opts.Scopes, " "))
 	}
 
 	for k, v := range opts.AuthorizationExtParams {
